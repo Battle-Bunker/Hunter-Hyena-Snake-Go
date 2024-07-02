@@ -102,3 +102,6 @@ func RunServer() {
 	log.Printf("Running Battlesnake at http://0.0.0.0:%s...\n", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
+func main() {
+	RunServer()
+}
