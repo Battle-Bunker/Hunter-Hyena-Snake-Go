@@ -1,6 +1,6 @@
 package main
 
-// Welcome to
+// Welcome to fdsfdsfsd
 // __________         __    __  .__                               __
 // \______   \_____ _/  |__/  |_|  |   ____   ______ ____ _____  |  | __ ____
 //  |    |  _/\__  \\   __\   __\  | _/ __ \ /  ___//    \\__  \ |  |/ // __ \
@@ -66,39 +66,37 @@ func end(state GameState) {
 	log.Printf("GAME OVER\n\n")
 }
 
-func detect_danger(state GameState) []Coord {
+func detect_danger(state GameState) (dangerZones []Coord, potentialHeadToHeads []Coord) {
 	mySnake := state.You
 	snakes := state.Board.Snakes
-	danger_zones := []Coord{}
 
 	for _, snake := range snakes {
 		for _, bodypart := range snake.Body {
 			if bodypart == snake.Body[snake.Length-1] {
 				if snake.Health == 100 {
-					danger_zones = append(danger_zones, bodypart)
+					dangerZones = append(dangerZones, bodypart)
 				}
 			} else {
-				danger_zones = append(danger_zones, bodypart)
+				dangerZones = append(dangerZones, bodypart)
 			}
 		}
 
 		if !(snake.ID == mySnake.ID) {
 			if snake.Length >= mySnake.Length {
-				danger_zones = append(danger_zones, Coord{X: snake.Head.X + 1, Y: snake.Head.Y})
-				danger_zones = append(danger_zones, Coord{X: snake.Head.X - 1, Y: snake.Head.Y})
-				danger_zones = append(danger_zones, Coord{X: snake.Head.X, Y: snake.Head.Y + 1})
-				danger_zones = append(danger_zones, Coord{X: snake.Head.X, Y: snake.Head.Y - 1})
+				potentialHeadToHeads = append(potentialHeadToHeads, Coord{X: snake.Head.X + 1, Y: snake.Head.Y})
+				potentialHeadToHeads = append(potentialHeadToHeads, Coord{X: snake.Head.X - 1, Y: snake.Head.Y})
+				potentialHeadToHeads = append(potentialHeadToHeads, Coord{X: snake.Head.X, Y: snake.Head.Y + 1})
+				potentialHeadToHeads = append(potentialHeadToHeads, Coord{X: snake.Head.X, Y: snake.Head.Y - 1})
 			}
 		}
 	}
-	return danger_zones
+	return dangerZones, potentialHeadToHeads
 }
 
 // move is called on every turn and returns your next move
 // Valid moves are "up", "down", "left", or "right"
 // See https://docs.battlesnake.com/api/example-move for available data
 func move(state GameState) BattlesnakeMoveResponse {
-
 	myHead := state.You.Body[0] // Coordinates of your head
 
 	isMoveSafe := map[string]bool{
@@ -120,7 +118,9 @@ func move(state GameState) BattlesnakeMoveResponse {
 		isMoveSafe["up"] = false
 	}
 
-	for _, dangerZone := range detect_danger(state) {
+	dangerZones, potentialHeadToHeads := detect_danger(state)
+
+	for _, dangerZone := range dangerZones {
 		if (Coord{X: myHead.X + 1, Y: myHead.Y}) == dangerZone {
 			isMoveSafe["right"] = false
 		} else if (Coord{X: myHead.X - 1, Y: myHead.Y}) == dangerZone {
@@ -141,6 +141,52 @@ func move(state GameState) BattlesnakeMoveResponse {
 	}
 
 	if len(safeMoves) == 0 {
+		// If no safe moves, consider potential head-to-head moves
+		headToHeadMoves := []string{}
+		for move, isSafe := range isMoveSafe {
+			if !isSafe {
+				if potentialHeadToHead, exists := map[string]Coord{
+					"up":    {X: myHead.X, Y: myHead.Y + 1},
+					"down":  {X: myHead.X, Y: myHead.Y - 1},
+					"left":  {X: myHead.X - 1, Y: myHead.Y},
+					"right": {X: myHead.X + 1, Y: myHead.Y},
+				}[move]; exists {
+					for _, potential := range potentialHeadToHeads {
+						if potential == potentialHeadToHead {
+							headToHeadMoves = append(headToHeadMoves, move)
+						}
+					}
+				}
+			}
+		}
+
+		// Prioritize head-to-head moves based on the opponent's proximity to food
+		if len(headToHeadMoves) > 0 {
+			food := state.Board.Food
+			var bestMove string
+			minFoodDistance := math.MaxInt32
+
+			for _, move := range headToHeadMoves {
+				potentialMove := map[string]Coord{
+					"up":    {X: myHead.X, Y: myHead.Y + 1},
+					"down":  {X: myHead.X, Y: myHead.Y - 1},
+					"left":  {X: myHead.X - 1, Y: myHead.Y},
+					"right": {X: myHead.X + 1, Y: myHead.Y},
+				}[move]
+
+				for _, foodPoint := range food {
+					distance := ManhattanDistance(potentialMove, foodPoint)
+					if distance < minFoodDistance {
+						minFoodDistance = distance
+						bestMove = move
+					}
+				}
+			}
+
+			log.Printf("MOVE %d: Head-to-head move %s\n", state.Turn, bestMove)
+			return BattlesnakeMoveResponse{Move: bestMove}
+		}
+
 		log.Printf("MOVE %d: No safe moves detected :( Moving up\n", state.Turn)
 		return BattlesnakeMoveResponse{Move: "up"}
 	}
@@ -148,9 +194,8 @@ func move(state GameState) BattlesnakeMoveResponse {
 	// Choose a random move from the safe ones
 	nextMove := safeMoves[rand.Intn(len(safeMoves))]
 
-	// TODO: Step 4 - Move towards food instead of random, to regain health and survive longer
+	// Move towards the closest food if it's safe
 	food := state.Board.Food
-
 	closestFood := FindClosestFood(myHead, food)
 
 	dx := closestFood.X - myHead.X
